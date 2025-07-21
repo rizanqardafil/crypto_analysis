@@ -4,9 +4,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import pandas as pd
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ===== KONFIGURASI API =====
-CMC_API_KEY = "9b77ca70-310b-4975-b4a6-ae1235330c7a"
+CMC_API_KEY = os.getenv("CMC_API_KEY")
 FEAR_GREED_API = "https://api.alternative.me/fng/"
 
 # ===== FUNGSI AMBIL DATA =====
