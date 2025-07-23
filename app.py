@@ -303,7 +303,7 @@ with st.sidebar:
         st.rerun()
 
 # Layout dengan tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Analisis Teknis", "🌍 Market Global", "🎯 Trading Signals"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📈 Analisis Teknis", "🌍 Market Global", "🎯 Trading Signals", "📋 Trading Log"])
 
 # Ambil data
 if coin_id:
@@ -666,6 +666,310 @@ if data:
             
             st.warning("⚠️ **Disclaimer**: Pivot points are estimates based on 24h data. Real High/Low/Close from exchange data will be more accurate!")
 
+    with tab5:
+        st.subheader("📋 Trading Log & Kalkulator Harian")
+        
+        # Load existing data if available
+        log_file = "trading_log.csv"
+        if os.path.exists(log_file):
+            try:
+                df_log = pd.read_csv(log_file)
+                # Ensure proper column types
+                df_log['Tanggal'] = pd.to_datetime(df_log['Tanggal'])
+            except Exception as e:
+                st.error(f"Error loading log: {e}")
+                df_log = pd.DataFrame(columns=["Tanggal", "Coin", "Entry Price", "TP Price", "SL Price", "Modal (Rp)", "% Gain", "Laba Bersih (Rp)", "Total Saldo (Rp)", "Status"])
+        else:
+            df_log = pd.DataFrame(columns=["Tanggal", "Coin", "Entry Price", "TP Price", "SL Price", "Modal (Rp)", "% Gain", "Laba Bersih (Rp)", "Total Saldo (Rp)", "Status"])
+
+        # Summary statistics
+        if not df_log.empty:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_trades = len(df_log)
+                st.metric("📊 Total Trades", total_trades)
+            
+            with col2:
+                profitable_trades = len(df_log[df_log['% Gain'] > 0])
+                win_rate = (profitable_trades / total_trades * 100) if total_trades > 0 else 0
+                st.metric("🎯 Win Rate", f"{win_rate:.1f}%")
+            
+            with col3:
+                total_profit = df_log['Laba Bersih (Rp)'].sum()
+                st.metric("💰 Total P&L", f"Rp {total_profit:,.0f}")
+            
+            with col4:
+                avg_gain = df_log['% Gain'].mean()
+                st.metric("📈 Avg Gain", f"{avg_gain:.2f}%")
+
+        # Input section
+        st.markdown("### ➕ Tambahkan Trading Log Baru")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            with st.form("trading_log_form"):
+                st.markdown("**📝 Trade Details:**")
+                
+                tanggal = st.date_input("📅 Tanggal Trade", value=pd.Timestamp.now().date())
+                
+                # Use current selected coin as default if available
+                default_coin = f"{data['symbol']}USDT" if data else "BTCUSDT"
+                coin = st.text_input("🪙 Coin/Pair", value=default_coin)
+                
+                # Pre-fill with current price if available
+                default_entry = data['harga'] if data else 40000.0
+                entry_price = st.number_input("💹 Entry Price ($)", min_value=0.0, value=float(default_entry), step=0.0001, format="%.4f")
+                
+                col_tp, col_sl = st.columns(2)
+                with col_tp:
+                    tp_price = st.number_input("🎯 TP Price ($)", min_value=0.0, value=float(default_entry * 1.05), step=0.0001, format="%.4f")
+                with col_sl:
+                    sl_price = st.number_input("🛑 SL Price ($)", min_value=0.0, value=float(default_entry * 0.95), step=0.0001, format="%.4f")
+                
+                modal_idr = st.number_input("💵 Modal (Rp)", min_value=0, value=3000000, step=100000)
+                fee_percent = st.number_input("⚖️ Trading Fee (%)", min_value=0.0, value=0.075, step=0.01, format="%.3f")
+                
+                trade_type = st.selectbox("📊 Trade Type", ["Long", "Short"], index=0)
+                
+                submitted = st.form_submit_button("💾 Simpan Log", type="primary")
+        
+        with col2:
+            # Real-time calculator
+            st.markdown("**🧮 Live Calculator:**")
+            
+            if entry_price > 0:
+                # Calculate for TP
+                if trade_type == "Long":
+                    tp_gain = ((tp_price - entry_price) / entry_price) * 100
+                    sl_loss = ((sl_price - entry_price) / entry_price) * 100
+                else:  # Short
+                    tp_gain = ((entry_price - tp_price) / entry_price) * 100
+                    sl_loss = ((entry_price - sl_price) / entry_price) * 100
+                
+                # TP Calculation
+                laba_kotor_tp = modal_idr * (tp_gain / 100)
+                fee_tp = abs(laba_kotor_tp) * (fee_percent / 100)
+                laba_bersih_tp = laba_kotor_tp - fee_tp
+                total_saldo_tp = modal_idr + laba_bersih_tp
+                
+                # SL Calculation  
+                laba_kotor_sl = modal_idr * (sl_loss / 100)
+                fee_sl = abs(laba_kotor_sl) * (fee_percent / 100)
+                laba_bersih_sl = laba_kotor_sl - fee_sl
+                total_saldo_sl = modal_idr + laba_bersih_sl
+                
+                # Display results
+                st.success(f"🎯 **Take Profit Scenario:**")
+                st.write(f"• Gain: {tp_gain:+.2f}%")
+                st.write(f"• Laba Bersih: Rp {laba_bersih_tp:,.0f}")
+                st.write(f"• Total Saldo: Rp {total_saldo_tp:,.0f}")
+                
+                st.error(f"🛑 **Stop Loss Scenario:**")
+                st.write(f"• Loss: {sl_loss:+.2f}%")
+                st.write(f"• Laba Bersih: Rp {laba_bersih_sl:,.0f}")
+                st.write(f"• Total Saldo: Rp {total_saldo_sl:,.0f}")
+                
+                # Risk/Reward Ratio
+                if sl_loss != 0:
+                    rr_ratio = abs(tp_gain / sl_loss)
+                    st.info(f"⚖️ **R:R Ratio**: 1:{rr_ratio:.2f}")
+                    
+                    if rr_ratio >= 2:
+                        st.success("✅ Good Risk/Reward Ratio!")
+                    elif rr_ratio >= 1.5:
+                        st.warning("⚠️ Acceptable Risk/Reward")
+                    else:
+                        st.error("❌ Poor Risk/Reward Ratio")
+
+        # Process form submission
+        if submitted and entry_price > 0:
+            # Calculate gains based on trade type
+            if trade_type == "Long":
+                tp_percent_gain = ((tp_price - entry_price) / entry_price) * 100
+                sl_percent_loss = ((sl_price - entry_price) / entry_price) * 100
+            else:  # Short
+                tp_percent_gain = ((entry_price - tp_price) / entry_price) * 100
+                sl_percent_loss = ((entry_price - sl_price) / entry_price) * 100
+            
+            # For logging purposes, we'll save TP scenario as the planned trade
+            laba_kotor = modal_idr * (tp_percent_gain / 100)
+            fee = abs(laba_kotor) * (fee_percent / 100)
+            laba_bersih = laba_kotor - fee
+            total_saldo = modal_idr + laba_bersih
+
+            # Add to dataframe
+            new_row = {
+                "Tanggal": tanggal,
+                "Coin": coin,
+                "Entry Price": entry_price,
+                "TP Price": tp_price,
+                "SL Price": sl_price,
+                "Modal (Rp)": modal_idr,
+                "% Gain": round(tp_percent_gain, 2),
+                "Laba Bersih (Rp)": round(laba_bersih, 0),
+                "Total Saldo (Rp)": round(total_saldo, 0),
+                "Status": "Planned"
+            }
+            
+            df_log = pd.concat([df_log, pd.DataFrame([new_row])], ignore_index=True)
+
+            # Save to CSV
+            try:
+                df_log.to_csv(log_file, index=False)
+                st.success("✅ Trading log berhasil disimpan!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error saving log: {e}")
+
+        # Display trading history
+        st.markdown("### 📈 Trading History")
+        
+        if not df_log.empty:
+            # Filter options
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Date filter
+                if len(df_log) > 0:
+                    min_date = df_log['Tanggal'].min().date()
+                    max_date = df_log['Tanggal'].max().date()
+                    date_range = st.date_input(
+                        "📅 Filter Tanggal",
+                        value=(min_date, max_date),
+                        min_value=min_date,
+                        max_value=max_date
+                    )
+            
+            with col2:
+                # Coin filter
+                unique_coins = ['All'] + sorted(df_log['Coin'].unique().tolist())
+                selected_coin = st.selectbox("🪙 Filter Coin", unique_coins)
+            
+            with col3:
+                # Status filter
+                unique_status = ['All'] + sorted(df_log['Status'].unique().tolist())
+                selected_status = st.selectbox("📊 Filter Status", unique_status)
+            
+            # Apply filters
+            df_filtered = df_log.copy()
+            
+            if len(date_range) == 2:
+                df_filtered = df_filtered[
+                    (df_filtered['Tanggal'].dt.date >= date_range[0]) &
+                    (df_filtered['Tanggal'].dt.date <= date_range[1])
+                ]
+            
+            if selected_coin != 'All':
+                df_filtered = df_filtered[df_filtered['Coin'] == selected_coin]
+            
+            if selected_status != 'All':
+                df_filtered = df_filtered[df_filtered['Status'] == selected_status]
+            
+            # Display filtered data
+            if not df_filtered.empty:
+                # Format display
+                df_display = df_filtered.copy()
+                df_display['Tanggal'] = df_display['Tanggal'].dt.strftime('%Y-%m-%d')
+                df_display['Modal (Rp)'] = df_display['Modal (Rp)'].apply(lambda x: f"Rp {x:,.0f}")
+                df_display['Laba Bersih (Rp)'] = df_display['Laba Bersih (Rp)'].apply(lambda x: f"Rp {x:,.0f}")
+                df_display['Total Saldo (Rp)'] = df_display['Total Saldo (Rp)'].apply(lambda x: f"Rp {x:,.0f}")
+                
+                st.dataframe(
+                    df_display,
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Performance metrics for filtered data
+                st.markdown("### 📊 Performance Summary (Filtered)")
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    avg_return = df_filtered['% Gain'].mean()
+                    st.metric("📈 Avg Return", f"{avg_return:.2f}%")
+                
+                with col2:
+                    best_trade = df_filtered['% Gain'].max()
+                    st.metric("🏆 Best Trade", f"{best_trade:.2f}%")
+                
+                with col3:
+                    worst_trade = df_filtered['% Gain'].min()
+                    st.metric("📉 Worst Trade", f"{worst_trade:.2f}%")
+                
+                with col4:
+                    total_pl = df_filtered['Laba Bersih (Rp)'].sum()
+                    st.metric("💰 Total P&L", f"Rp {total_pl:,.0f}")
+                
+                # Action buttons
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    # Download CSV
+                    csv_data = df_filtered.to_csv(index=False)
+                    st.download_button(
+                        "📥 Download CSV",
+                        data=csv_data,
+                        file_name=f"trading_log_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+                
+                with col2:
+                    # Clear all data (with confirmation)
+                    if st.button("🗑️ Clear All Data", type="secondary"):
+                        if st.button("⚠️ Confirm Delete", type="secondary"):
+                            if os.path.exists(log_file):
+                                os.remove(log_file)
+                                st.success("✅ All data cleared!")
+                                st.rerun()
+                
+                with col3:
+                    # Export to Excel (if needed)
+                    try:
+                        excel_buffer = pd.ExcelWriter('trading_log.xlsx', engine='openpyxl')
+                        df_filtered.to_excel(excel_buffer, sheet_name='Trading_Log', index=False)
+                        excel_buffer.close()
+                        
+                        with open('trading_log.xlsx', 'rb') as f:
+                            st.download_button(
+                                "📊 Download Excel",
+                                data=f.read(),
+                                file_name=f"trading_log_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                    except:
+                        pass  # Excel export optional
+            
+            else:
+                st.info("📭 No data matches the selected filters.")
+        
+        else:
+            st.info("📝 Belum ada trading log. Mulai tambahkan trade pertama Anda!")
+            
+        # Trading tips
+        with st.expander("💡 Tips Trading Log"):
+            st.markdown("""
+            **📋 Cara Menggunakan Trading Log:**
+            1. **Pre-trade**: Input entry, TP, SL untuk planning
+            2. **Live Calculator**: Lihat real-time P&L calculation
+            3. **Post-trade**: Update status setelah trade selesai
+            4. **Analysis**: Gunakan filter untuk review performance
+            
+            **🎯 Best Practices:**
+            - Selalu set R:R ratio minimal 1:2
+            - Log semua trade untuk tracking performance
+            - Review monthly untuk improvement
+            - Gunakan filter untuk analisis pattern
+            
+            **⚠️ Risk Management:**
+            - Maksimal risk 2-3% per trade
+            - Diversifikasi across different coins
+            - Stick to your trading plan
+            - Cut losses quickly, let profits run
+            """)
+
+# END OF TAB5 ADDITIO
 else:
     st.error("❌ Tidak dapat mengambil data. Periksa koneksi internet dan API key.")
 
